@@ -1,4 +1,4 @@
-use poise::serenity_prelude::UserId;
+use poise::serenity_prelude as serenity;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -38,20 +38,80 @@ pub struct Ballot {
     pub votes: BTreeMap<Name, usize>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+impl Ballot {
+    pub fn make_embed(&self) -> serenity::CreateEmbed {
+        let embed = serenity::CreateEmbed::new()
+            .title("Your current ballot")
+            .color(serenity::Color::DARK_GREEN)
+            .field(
+                "Votes",
+                self.votes
+                    .iter()
+                    .map(|(n, r)| format!("* {n} {r}"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                false,
+            );
+        embed
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Election {
+    owner: serenity::UserId,
     pub candidates: BTreeMap<Name, Region>,
     offices: usize,
     reserved_offices: Vec<Region>,
-    pub ballots: BTreeMap<UserId, Ballot>,
+    pub ballots: BTreeMap<serenity::UserId, Ballot>,
 }
 
 impl Election {
-    pub fn new(offices: usize) -> Self {
-        Self {
+    pub fn new<UID: Into<serenity::UserId>>(owner: UID, offices: usize) -> Election {
+        Election {
+            owner: owner.into(),
             offices,
-            ..Default::default()
+
+            candidates: BTreeMap::new(),
+            reserved_offices: Vec::new(),
+            ballots: BTreeMap::new(),
         }
+    }
+
+    pub fn owner(&self) -> &serenity::UserId {
+        &self.owner
+    }
+
+    pub fn make_embed(&self) -> serenity::CreateEmbed {
+        let mut embed = serenity::CreateEmbed::new()
+            .title("The TEA House Moderator Election")
+            .color(serenity::Color::BLURPLE)
+            .field(
+                "Candidates",
+                self.candidates
+                    .iter()
+                    .map(|(n, r)| format!("* {n} (Region {r})"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                false,
+            );
+
+        if !self.reserved_offices.is_empty() {
+            embed = embed.field(
+                "Reserved offices",
+                self.reserved_offices
+                    .iter()
+                    .map(|v| format!("* {v}"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                false,
+            );
+        }
+
+        if !self.ballots.is_empty() {
+            embed = embed.field("Voters", format!("{}", self.ballots.len()), true);
+        }
+
+        embed
     }
 
     pub fn reserve_office<R: Into<Region>>(&mut self, region: R) -> bool {
@@ -67,7 +127,8 @@ impl Election {
         self.candidates.insert(name.into(), region.into());
     }
 
-    pub fn vote<N: Into<Name>>(&mut self, user_id: UserId, name: N, rank: usize) {
+    #[allow(unused)]
+    pub fn vote<N: Into<Name>>(&mut self, user_id: serenity::UserId, name: N, rank: usize) {
         self.ballots
             .entry(user_id)
             .or_default()
@@ -91,29 +152,37 @@ impl Election {
         results
     }
 
-    fn assign(&self, mut results: Vec<(usize, Name)>) -> Vec<Name> {
+    fn assign(&self, mut results: Vec<(usize, Name)>) -> Option<Vec<Name>> {
         let mut reserved_offices = self.reserved_offices.clone();
         let mut unreserved = self.offices - self.reserved_offices.len();
         let mut officers = Vec::new();
 
         while officers.len() < self.offices {
-            let (_, candidate) = results.pop().unwrap();
+            let (_, candidate) = results.pop()?;
+            tracing::info!("assigning {candidate} {officers:?}({})", self.offices);
             let region = self.candidates.get(&candidate).unwrap();
 
             if let Some(ix) = reserved_offices.iter().position(|x| x == region) {
-                officers.push(candidate);
+                officers.push(candidate.clone());
                 reserved_offices.remove(ix);
+                tracing::warn!(
+                    "{candidate} takes reserved office {region} ({})",
+                    reserved_offices.len()
+                );
             } else if unreserved > 0 {
-                officers.push(candidate);
+                officers.push(candidate.clone());
                 unreserved -= 1;
+                tracing::warn!("{candidate} takes unreserved office {unreserved}");
+            } else {
+                tracing::warn!("Could not assign {candidate}");
             }
         }
 
         officers.sort();
-        officers
+        Some(officers)
     }
 
-    fn run(&self) -> Vec<Name> {
+    pub fn run(&self) -> Option<Vec<Name>> {
         let results = self.tally();
         self.assign(results)
     }
@@ -145,7 +214,7 @@ mod test {
         ],
         vec![("a", 10), ("b", 10), ("c", 10), ("d", 10)]; "vote ties")]
     fn test_tally<N: Into<Name>>(votes: Vec<Vec<(N, usize)>>, expected: Vec<(N, usize)>) {
-        let mut election = Election::default();
+        let mut election = Election::new(1, 1);
         for (i, ballot) in votes.into_iter().enumerate() {
             for (n, rank) in ballot {
                 election.vote((i as u64).into(), n, rank);
@@ -181,7 +250,7 @@ mod test {
         candidates: Vec<(N, R)>,
         expected: Vec<N>,
     ) {
-        let mut election = Election::new(offices);
+        let mut election = Election::new(1, offices);
         for reserve in reservations {
             election.reserve_office(reserve);
         }
@@ -194,12 +263,12 @@ mod test {
             result.push((usize, n.into()));
         }
         let expected = expected.into_iter().map(|n| n.into()).collect::<Vec<_>>();
-        assert_eq!(expected, election.assign(result));
+        assert_eq!(Some(expected), election.assign(result));
     }
 
     #[test]
     fn test_run_election() {
-        let mut election = Election::new(4);
+        let mut election = Election::new(1, 4);
         election.reserve_office("AMER");
         election.reserve_office("EMEA");
 

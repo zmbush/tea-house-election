@@ -23,6 +23,7 @@ impl<GuildData> GlobalData<GuildData> {
         self.guilds.values_mut().for_each(Migrate::migrate);
     }
 
+    #[allow(unused)]
     pub fn guild(&self, id: serenity::GuildId) -> Option<&GuildData> {
         self.guilds.get(&id)
     }
@@ -113,6 +114,7 @@ impl<D> GlobalState<D> {
         }
     }
 
+    #[allow(unused)]
     pub async fn read(&self) -> RwLockReadGuard<'_, GlobalData<D>> {
         self.data.read().await
     }
