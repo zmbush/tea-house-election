@@ -469,7 +469,18 @@ async fn get_result(
             CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new()
                     .ephemeral(true)
-                    .content(format!("{:?}", election.run())),
+                    .content(match election.run() {
+                        Some(list) => format!(
+                            "The following candidates have been elected:\n{}",
+                            list.into_iter()
+                                .map(|c| format!("* **{c}**"))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        ),
+                        None => "Election did not complete. Likely there were not enough \
+                            candidates to fill the required offices."
+                            .into(),
+                    }),
             ),
         )
         .await?;
