@@ -112,7 +112,9 @@ impl Action {
     }
 
     pub(crate) fn decode<S: AsRef<str>>(s: S) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(s.as_ref())
+        let s = s.as_ref();
+        tracing::info!("Decoding {s}");
+        serde_json::from_str(s)
     }
 
     pub(crate) fn button(&self) -> serenity::CreateButton {
@@ -120,37 +122,39 @@ impl Action {
 
         match self {
             Action::Election(ElectionAction { ty, .. }) => match ty {
-                ElectionActionType::InitiateVote => btn
-                    .label("Vote!")
-                    .emoji(serenity::ReactionType::Unicode("🗳️".into())),
+                ElectionActionType::InitiateVote => btn.label("Vote!").emoji(react("🗳️")),
                 ElectionActionType::GetResult => btn
                     .label("Results")
                     .style(serenity::ButtonStyle::Secondary)
-                    .emoji(serenity::ReactionType::Unicode("🧮".into())),
+                    .emoji(react("🧮")),
             },
             Action::Vote(VoteAction { ty, .. }) => match ty {
                 VoteActionType::ConfirmInitiateVote => btn
                     .label("Vote Again")
                     .style(serenity::ButtonStyle::Danger)
-                    .emoji(serenity::ReactionType::Unicode("🗳️".into())),
+                    .emoji(react("🗳️")),
                 VoteActionType::CancelVote => btn
-                    .emoji(serenity::ReactionType::Unicode("✅".into()))
+                    .emoji(react("✅"))
                     .style(serenity::ButtonStyle::Secondary)
                     .label("Keep Existing Votes"),
 
                 VoteActionType::SkipVote => btn
                     .style(serenity::ButtonStyle::Secondary)
-                    .emoji(serenity::ReactionType::Unicode("🤷".into()))
+                    .emoji(react("🤷"))
                     .label("Skip"),
                 VoteActionType::VoidBallot => btn
                     .style(serenity::ButtonStyle::Danger)
-                    .emoji(serenity::ReactionType::Unicode("🛑".into()))
+                    .emoji(react("🛑"))
                     .label("Stop Voting"),
 
                 VoteActionType::SelectVote => unimplemented!("SelectVote is not a button"),
             },
         }
     }
+}
+
+fn react(s: &str) -> serenity::ReactionType {
+    s.try_into().expect("Invalid react emoji")
 }
 
 impl From<Action> for String {
