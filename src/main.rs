@@ -2,15 +2,16 @@
 
 use std::collections::HashMap;
 
+use actions::{Action, ElectionAction, ElectionActionType, VoteAction, VoteActionType};
 use anyhow::{anyhow, Context as _};
 use data::{GlobalData, GlobalState};
 use either::Either;
 use election::Election;
 use poise::{
     serenity_prelude::{
-        self as serenity, CreateActionRow, CreateButton, CreateInteractionResponse,
+        self as serenity, CreateActionRow, CreateInteractionResponse,
         CreateInteractionResponseMessage, CreateSelectMenu, CreateSelectMenuKind,
-        CreateSelectMenuOption, EditInteractionResponse, ReactionType,
+        CreateSelectMenuOption, EditInteractionResponse,
     },
     CreateReply, FrameworkContext,
 };
@@ -19,36 +20,36 @@ use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 use tracing::warn;
 use tracing_subscriber::{layer::SubscriberExt as _, Layer as _, Registry};
 
+mod actions;
 mod data;
 mod election;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct VoteInProgress {
     token: String,
-    election: ElectionId,
+    election: actions::ElectionId,
     election_message: serenity::MessageId,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Elections {
     #[serde(default)]
-    next_election_id: ElectionId,
-    elections: HashMap<ElectionId, election::Election>,
+    next_election_id: actions::ElectionId,
+    elections: HashMap<actions::ElectionId, election::Election>,
 
     #[serde(default)]
-    next_vote_id: VoteId,
+    next_vote_id: actions::VoteId,
     #[serde(default)]
-    votes_in_progress: HashMap<VoteId, VoteInProgress>,
+    votes_in_progress: HashMap<actions::VoteId, VoteInProgress>,
 }
 
 impl Elections {
-    fn vote_start<EID: Into<ElectionId>>(
+    fn vote_start<EID: Into<actions::ElectionId>>(
         &mut self,
         election: EID,
         interaction: &serenity::ComponentInteraction,
-    ) -> VoteId {
-        let vote_id = self.next_vote_id;
-        self.next_vote_id.0 += 1;
+    ) -> actions::VoteId {
+        let vote_id = self.next_vote_id.next();
         self.votes_in_progress.insert(
             vote_id,
             VoteInProgress {
@@ -60,11 +61,11 @@ impl Elections {
         vote_id
     }
 
-    fn vote_complete<VID: Into<VoteId>>(&mut self, vote: VID) {
+    fn vote_complete<VID: Into<actions::VoteId>>(&mut self, vote: VID) {
         self.votes_in_progress.remove(&vote.into());
     }
 
-    fn get_vote_in_progress<VID: Into<VoteId>>(
+    fn get_vote_in_progress<VID: Into<actions::VoteId>>(
         &self,
         vote: VID,
     ) -> Result<&VoteInProgress, anyhow::Error> {
@@ -73,7 +74,10 @@ impl Elections {
             .ok_or_else(|| anyhow!("No vote in progress!"))
     }
 
-    fn get_election<ID: ActionId>(&self, id: ID) -> Result<&election::Election, anyhow::Error> {
+    fn get_election<ID: actions::ActionId>(
+        &self,
+        id: ID,
+    ) -> Result<&election::Election, anyhow::Error> {
         match id.get_id() {
             Either::Left(election_id) => self
                 .elections
@@ -88,7 +92,7 @@ impl Elections {
         }
     }
 
-    fn get_election_mut<ID: ActionId>(
+    fn get_election_mut<ID: actions::ActionId>(
         &mut self,
         id: ID,
     ) -> Result<&mut election::Election, anyhow::Error> {
@@ -109,7 +113,7 @@ impl Elections {
     async fn edit_response(
         &self,
         ctx: impl serenity::CacheHttp + Copy,
-        vote: VoteAction,
+        vote: actions::VoteAction,
         interaction: &serenity::ComponentInteraction,
         edit_interaction: EditInteractionResponse,
     ) -> Result<(), anyhow::Error> {
@@ -130,7 +134,7 @@ impl Elections {
     async fn update_election(
         &self,
         ctx: impl serenity::CacheHttp + Copy,
-        action: VoteAction,
+        action: actions::VoteAction,
         interaction: &serenity::ComponentInteraction,
     ) -> Result<(), anyhow::Error> {
         let edit = serenity::EditMessage::new().embed(self.get_election(action)?.make_embed());
@@ -152,148 +156,7 @@ impl data::Migrate for Elections {
     fn migrate(&mut self) {}
 }
 
-trait ActionId {
-    fn get_id(&self) -> Either<&ElectionId, &VoteId>;
-}
-
 type Context<'a> = poise::Context<'a, data::GlobalState<Elections>, anyhow::Error>;
-
-#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-struct ElectionId(usize);
-
-impl ActionId for ElectionId {
-    fn get_id(&self) -> Either<&ElectionId, &VoteId> {
-        Either::Left(self)
-    }
-}
-
-#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-struct VoteId(usize);
-
-impl ActionId for VoteId {
-    fn get_id(&self) -> Either<&ElectionId, &VoteId> {
-        Either::Right(self)
-    }
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-struct ElectionAction {
-    election_id: ElectionId,
-    ty: ElectionActionType,
-}
-
-impl ActionId for ElectionAction {
-    fn get_id(&self) -> Either<&ElectionId, &VoteId> {
-        self.election_id.get_id()
-    }
-}
-
-impl From<ElectionAction> for ElectionId {
-    fn from(val: ElectionAction) -> Self {
-        val.election_id
-    }
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
-enum ElectionActionType {
-    InitiateVote,
-    GetResult,
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-struct VoteAction {
-    vote_id: VoteId,
-    ty: VoteActionType,
-}
-
-impl ActionId for VoteAction {
-    fn get_id(&self) -> Either<&ElectionId, &VoteId> {
-        self.vote_id.get_id()
-    }
-}
-
-impl From<VoteAction> for VoteId {
-    fn from(val: VoteAction) -> Self {
-        val.vote_id
-    }
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
-enum VoteActionType {
-    ConfirmInitiateVote,
-    SelectVote,
-    SkipVote,
-    CancelVote,
-    VoidBallot,
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-enum Action {
-    Election(ElectionAction),
-    Vote(VoteAction),
-}
-
-impl ActionId for Action {
-    fn get_id(&self) -> Either<&ElectionId, &VoteId> {
-        match self {
-            Action::Election(election_action) => election_action.get_id(),
-            Action::Vote(vote_action) => vote_action.get_id(),
-        }
-    }
-}
-
-impl Action {
-    fn encode(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string(self)
-    }
-
-    fn decode<S: AsRef<str>>(s: S) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(s.as_ref())
-    }
-
-    fn button(&self) -> CreateButton {
-        let btn = CreateButton::new(*self);
-
-        match self {
-            Action::Election(ElectionAction { ty, .. }) => match ty {
-                ElectionActionType::InitiateVote => {
-                    btn.label("Vote!").emoji(ReactionType::Unicode("🗳️".into()))
-                }
-                ElectionActionType::GetResult => btn
-                    .label("Results")
-                    .style(serenity::ButtonStyle::Secondary)
-                    .emoji(ReactionType::Unicode("🧮".into())),
-            },
-            Action::Vote(VoteAction { ty, .. }) => match ty {
-                VoteActionType::ConfirmInitiateVote => btn
-                    .label("Vote Again")
-                    .style(serenity::ButtonStyle::Danger)
-                    .emoji(ReactionType::Unicode("🗳️".into())),
-                VoteActionType::CancelVote => btn
-                    .emoji(ReactionType::Unicode("✅".into()))
-                    .style(serenity::ButtonStyle::Secondary)
-                    .label("Keep Existing Votes"),
-
-                VoteActionType::SkipVote => btn
-                    .style(serenity::ButtonStyle::Secondary)
-                    .emoji(ReactionType::Unicode("🤷".into()))
-                    .label("Skip"),
-                VoteActionType::VoidBallot => btn
-                    .style(serenity::ButtonStyle::Danger)
-                    .emoji(ReactionType::Unicode("🛑".into()))
-                    .label("Stop Voting"),
-
-                VoteActionType::SelectVote => unimplemented!("SelectVote is not a button"),
-            },
-        }
-    }
-}
-
-impl From<Action> for String {
-    fn from(val: Action) -> Self {
-        val.encode().expect("Could not encode action")
-    }
-}
 
 #[poise::command(slash_command, guild_only = true)]
 async fn election(
@@ -321,8 +184,7 @@ async fn election(
         election.add_candidate(candidate.trim(), region.trim());
     }
 
-    let election_id = guild.next_election_id;
-    guild.next_election_id.0 += 1;
+    let election_id = guild.next_election_id.next();
 
     let reply = CreateReply::default()
         .embed(election.make_embed())
@@ -346,7 +208,7 @@ async fn election(
     Ok(())
 }
 
-fn vote_menu<VID: Into<VoteId>>(vote_id: VID) -> Vec<CreateActionRow> {
+fn vote_menu<VID: Into<actions::VoteId>>(vote_id: VID) -> Vec<CreateActionRow> {
     let vote_id = vote_id.into();
     vec![
         CreateActionRow::SelectMenu(CreateSelectMenu::new(
@@ -381,7 +243,7 @@ fn vote_menu<VID: Into<VoteId>>(vote_id: VID) -> Vec<CreateActionRow> {
 
 async fn initiate_vote(
     ctx: &serenity::Context,
-    action: Action,
+    action: actions::Action,
     interaction: &serenity::ComponentInteraction,
     data: &mut RwLockWriteGuard<'_, data::GlobalData<Elections>>,
 ) -> Result<(), anyhow::Error> {
@@ -390,13 +252,13 @@ async fn initiate_vote(
         .ok_or_else(|| anyhow::anyhow!("No guild id. Must be in a guild"))?;
     let guild = data.guild_mut(guild_id);
     let (vote_id, confirmed) = match action {
-        Action::Election(ElectionAction {
+        actions::Action::Election(actions::ElectionAction {
             election_id: id,
-            ty: ElectionActionType::InitiateVote,
+            ty: actions::ElectionActionType::InitiateVote,
         }) => (guild.vote_start(id, interaction), false),
-        Action::Vote(VoteAction {
+        actions::Action::Vote(actions::VoteAction {
             vote_id: id,
-            ty: VoteActionType::ConfirmInitiateVote,
+            ty: actions::VoteActionType::ConfirmInitiateVote,
         }) => (id, true),
         _ => return Err(anyhow!("Invalid action for initiate_vote: {action:?}")),
     };
@@ -415,16 +277,16 @@ async fn initiate_vote(
                         )
                         .add_embed(election.ballots[&interaction.user.id].make_embed())
                         .button(
-                            Action::Vote(VoteAction {
+                            actions::Action::Vote(actions::VoteAction {
                                 vote_id,
-                                ty: VoteActionType::ConfirmInitiateVote,
+                                ty: actions::VoteActionType::ConfirmInitiateVote,
                             })
                             .button(),
                         )
                         .button(
-                            Action::Vote(VoteAction {
+                            actions::Action::Vote(actions::VoteAction {
                                 vote_id,
-                                ty: VoteActionType::CancelVote,
+                                ty: actions::VoteActionType::CancelVote,
                             })
                             .button(),
                         ),
@@ -440,7 +302,7 @@ async fn initiate_vote(
             .ok_or_else(|| anyhow!("No candidates!"))?;
         let content = format!("# Please vote for the candidate\n{name} (Region: {region})");
         match action {
-            Action::Election(_) => {
+            actions::Action::Election(_) => {
                 interaction
                     .create_response(
                         ctx,
@@ -453,7 +315,7 @@ async fn initiate_vote(
                     )
                     .await?;
             }
-            Action::Vote(vote_action) => {
+            actions::Action::Vote(vote_action) => {
                 guild
                     .edit_response(
                         ctx,
@@ -474,7 +336,7 @@ async fn initiate_vote(
 
 async fn select_vote(
     ctx: &serenity::Context,
-    action: VoteAction,
+    action: actions::VoteAction,
     interaction: &serenity::ComponentInteraction,
     data: &mut RwLockWriteGuard<'_, data::GlobalData<Elections>>,
 ) -> Result<(), anyhow::Error> {
@@ -495,7 +357,7 @@ async fn select_vote(
                 {
                     let vote = values[0].parse()?;
                     ballot.votes.insert(name.clone(), vote);
-                } else if action.ty == VoteActionType::SkipVote {
+                } else if action.ty == actions::VoteActionType::SkipVote {
                     ballot.votes.insert(name.clone(), 0);
                 }
             } else {
@@ -537,7 +399,7 @@ async fn select_vote(
 
 async fn stop_vote(
     ctx: &serenity::Context,
-    action: VoteAction,
+    action: actions::VoteAction,
     interaction: &serenity::ComponentInteraction,
     data: &mut RwLockWriteGuard<'_, data::GlobalData<Elections>>,
 ) -> Result<(), anyhow::Error> {
@@ -547,7 +409,7 @@ async fn stop_vote(
     let guild = data.guild_mut(guild_id);
     let election = guild.get_election_mut(action)?;
 
-    if action.ty == VoteActionType::VoidBallot {
+    if action.ty == actions::VoteActionType::VoidBallot {
         let _: Option<_> = election.ballots.remove(&interaction.user.id);
         guild
             .edit_response(
@@ -575,7 +437,7 @@ async fn stop_vote(
 
 async fn get_result(
     ctx: &serenity::Context,
-    action: ElectionAction,
+    action: actions::ElectionAction,
     interaction: &serenity::ComponentInteraction,
     data: &RwLockReadGuard<'_, data::GlobalData<Elections>>,
 ) -> Result<(), anyhow::Error> {
@@ -625,32 +487,32 @@ async fn event_handler(
         interaction: serenity::Interaction::Component(interaction),
     } = event
     {
-        if let Ok(action) = Action::decode(&interaction.data.custom_id) {
+        if let Ok(action) = actions::Action::decode(&interaction.data.custom_id) {
             match action {
-                Action::Vote(vote_action) => match vote_action.ty {
-                    VoteActionType::ConfirmInitiateVote => {
+                actions::Action::Vote(vote_action) => match vote_action.ty {
+                    actions::VoteActionType::ConfirmInitiateVote => {
                         let mut data = data.write().await;
                         initiate_vote(ctx, action, interaction, &mut data).await?;
                         data.persist("elections")?;
                     }
-                    VoteActionType::SelectVote | VoteActionType::SkipVote => {
+                    actions::VoteActionType::SelectVote | actions::VoteActionType::SkipVote => {
                         let mut data = data.write().await;
                         select_vote(ctx, vote_action, interaction, &mut data).await?;
                         data.persist("elections")?;
                     }
-                    VoteActionType::CancelVote | VoteActionType::VoidBallot => {
+                    actions::VoteActionType::CancelVote | actions::VoteActionType::VoidBallot => {
                         let mut data = data.write().await;
                         stop_vote(ctx, vote_action, interaction, &mut data).await?;
                         data.persist("elections")?;
                     }
                 },
-                Action::Election(election_action) => match election_action.ty {
-                    ElectionActionType::InitiateVote => {
+                actions::Action::Election(election_action) => match election_action.ty {
+                    actions::ElectionActionType::InitiateVote => {
                         let mut data = data.write().await;
                         initiate_vote(ctx, action, interaction, &mut data).await?;
                         data.persist("elections")?;
                     }
-                    ElectionActionType::GetResult => {
+                    actions::ElectionActionType::GetResult => {
                         let data = data.read().await;
                         get_result(ctx, election_action, interaction, &data).await?;
                     }
