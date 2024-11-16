@@ -47,7 +47,13 @@ impl Ballot {
                 "Votes",
                 self.votes
                     .iter()
-                    .map(|(n, r)| format!("* {n} {r}"))
+                    .map(|(n, r)| {
+                        if *r > 0 {
+                            format!("* **{n}**: {r}")
+                        } else {
+                            format!("* **{n}**: Abstained")
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join("\n"),
                 false,
@@ -85,6 +91,7 @@ impl Election {
         let mut embed = serenity::CreateEmbed::new()
             .title("The TEA House Moderator Election")
             .color(serenity::Color::BLURPLE)
+            .field("Offices", format!("{}", self.offices), true)
             .field(
                 "Candidates",
                 self.candidates

@@ -23,7 +23,6 @@ impl<GuildData> GlobalData<GuildData> {
         self.guilds.values_mut().for_each(Migrate::migrate);
     }
 
-    #[allow(unused)]
     pub fn guild(&self, id: serenity::GuildId) -> Option<&GuildData> {
         self.guilds.get(&id)
     }
