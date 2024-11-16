@@ -160,7 +160,7 @@ async fn election(
 
     let mut election = Election::new(ctx.author(), offices);
     for office in reserved_offices.split(',') {
-        if !election.reserve_office(office) {
+        if !election.reserve_office(office.trim()) {
             return Err(anyhow!("Too many office reservations"));
         }
     }
@@ -168,7 +168,7 @@ async fn election(
         let (candidate, region) = candidate
             .split_once(";")
             .ok_or_else(|| anyhow!("Could not split candidate {candidate} at ;"))?;
-        election.add_candidate(candidate, region);
+        election.add_candidate(candidate.trim(), region.trim());
     }
 
     let reply = CreateReply::default()

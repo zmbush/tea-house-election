@@ -136,23 +136,33 @@ impl Election {
             .insert(name.into(), rank);
     }
 
-    fn tally(&self) -> Vec<(usize, Name)> {
+    fn tally(&self) -> Vec<(f32, Name)> {
         let mut rng = rand::thread_rng();
 
+        // Track the count of non-zero votes so that the total score can be normalized.
+        let mut votes = HashMap::<Name, usize>::new();
         let mut results = HashMap::<Name, usize>::new();
         for ballot in self.ballots.values() {
             for (name, rank) in &ballot.votes {
                 *results.entry(name.clone()).or_default() += rank;
+                *votes.entry(name.clone()).or_default() += if *rank > 0 { 1 } else { 0 };
             }
         }
-        let mut results: Vec<_> = results.into_iter().map(|(n, v)| (v, n)).collect();
+        let mut results: Vec<_> = results
+            .into_iter()
+            .map(|(n, v)| {
+                let num_votes = *votes.get(&n).unwrap_or(&0);
+                // Normalize the score for this candidate.
+                ((v as f32 / num_votes as f32) * self.ballots.len() as f32, n)
+            })
+            .collect();
         results.shuffle(&mut rng);
-        results.sort_by_key(|v| v.0);
+        results.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
         results
     }
 
-    fn assign(&self, mut results: Vec<(usize, Name)>) -> Option<Vec<Name>> {
+    fn assign(&self, mut results: Vec<(f32, Name)>) -> Option<Vec<Name>> {
         let mut reserved_offices = self.reserved_offices.clone();
         let mut unreserved = self.offices - self.reserved_offices.len();
         let mut officers = Vec::new();
@@ -197,14 +207,14 @@ mod test {
         vec![
             vec![("a", 1), ("b", 2), ("c", 3)]
         ],
-        vec![("a", 1), ("b", 2), ("c", 3)]; "single voter")]
+        vec![("a", 1.), ("b", 2.), ("c", 3.)]; "single voter")]
     #[test_case(
         vec![
             vec![("a", 1), ("b", 2), ("c", 3)],
             vec![("a", 4), ("b", 5), ("c", 6)],
             vec![("a", 7), ("b", 8), ("c", 9)],
         ],
-        vec![("a", 12), ("b", 15), ("c", 18)]; "multiple voters")]
+        vec![("a", 12.), ("b", 15.), ("c", 18.)]; "multiple voters")]
     #[test_case(
         vec![
             vec![("a", 1), ("b", 2), ("c", 3), ("d", 4)],
@@ -212,12 +222,18 @@ mod test {
             vec![("a", 3), ("b", 4), ("c", 1), ("d", 2)],
             vec![("a", 4), ("b", 1), ("c", 2), ("d", 3)],
         ],
-        vec![("a", 10), ("b", 10), ("c", 10), ("d", 10)]; "vote ties")]
-    fn test_tally<N: Into<Name>>(votes: Vec<Vec<(N, usize)>>, expected: Vec<(N, usize)>) {
+        vec![("a", 10.), ("b", 10.), ("c", 10.), ("d", 10.)]; "vote ties")]
+    #[test_case(
+        vec![
+            vec![("a", 2), ("b", 2), ("c", 2), ("d", 2)],
+            vec![("a", 2), ("b", 0), ("c", 2), ("d", 2)],
+        ],
+        vec![("a", 4.), ("b", 4.), ("c", 4.), ("d", 4.)]; "Allows abstention")]
+    fn test_tally<N: Into<Name>>(votes: Vec<Vec<(N, usize)>>, expected: Vec<(N, f32)>) {
         let mut election = Election::new(1, 1);
         for (i, ballot) in votes.into_iter().enumerate() {
             for (n, rank) in ballot {
-                election.vote((i as u64).into(), n, rank);
+                election.vote((i as u64 + 1).into(), n, rank);
             }
         }
         let tally = election.tally();
@@ -230,7 +246,7 @@ mod test {
     #[test_case(
         4,
         vec!["AMER"],
-        vec![(5, "a"), (7, "b"), (8, "d"), (9, "e"), (10, "c")],
+        vec![(5., "a"), (7., "b"), (8., "d"), (9., "e"), (10., "c")],
         vec![("a", "AMER"), ("b", "EMEA"), ("c", "EMEA"), ("d", "EMEA"), ("e", "EMEA")],
         vec!["a", "c", "d", "e"];
         "low vote reserved"
@@ -238,7 +254,7 @@ mod test {
     #[test_case(
         4,
         vec!["AMER", "EMEA"],
-        vec![(5, "a"), (7, "b"), (8, "d"), (9, "e"), (10, "c")],
+        vec![(5., "a"), (7., "b"), (8., "d"), (9., "e"), (10., "c")],
         vec![("a", "AMER"), ("b", "EMEA"), ("c", "EMEA"), ("d", "EMEA"), ("e", "AMER")],
         vec!["b", "c", "d", "e"];
         "simple"
@@ -246,7 +262,7 @@ mod test {
     fn test_assign<N: Into<Name>, R: Into<Region>>(
         offices: usize,
         reservations: Vec<R>,
-        tally: Vec<(usize, N)>,
+        tally: Vec<(f32, N)>,
         candidates: Vec<(N, R)>,
         expected: Vec<N>,
     ) {
