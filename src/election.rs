@@ -153,7 +153,7 @@ impl Election {
             .map(|(n, v)| {
                 let num_votes = *votes.get(&n).unwrap_or(&0);
                 // Normalize the score for this candidate.
-                ((v as f32 / num_votes as f32) * self.ballots.len() as f32, n)
+                (v as f32 / num_votes as f32, n)
             })
             .collect();
         results.shuffle(&mut rng);
@@ -214,7 +214,7 @@ mod test {
             vec![("a", 4), ("b", 5), ("c", 6)],
             vec![("a", 7), ("b", 8), ("c", 9)],
         ],
-        vec![("a", 12.), ("b", 15.), ("c", 18.)]; "multiple voters")]
+        vec![("a", 4.), ("b", 5.), ("c", 6.)]; "multiple voters")]
     #[test_case(
         vec![
             vec![("a", 1), ("b", 2), ("c", 3), ("d", 4)],
@@ -222,13 +222,16 @@ mod test {
             vec![("a", 3), ("b", 4), ("c", 1), ("d", 2)],
             vec![("a", 4), ("b", 1), ("c", 2), ("d", 3)],
         ],
-        vec![("a", 10.), ("b", 10.), ("c", 10.), ("d", 10.)]; "vote ties")]
+        vec![("a", 2.5), ("b", 2.5), ("c", 2.5), ("d", 2.5)]; "vote ties")]
     #[test_case(
         vec![
             vec![("a", 2), ("b", 2), ("c", 2), ("d", 2)],
-            vec![("a", 2), ("b", 0), ("c", 2), ("d", 2)],
+            vec![("a", 2), ("b", 0), ("c", 2), ("d", 0)],
+            vec![("a", 2), ("b", 2), ("c", 2), ("d", 2)],
+            vec![("a", 2), ("b", 2), ("c", 0), ("d", 0)],
+            vec![("a", 2), ("b", 2), ("c", 0), ("d", 2)],
         ],
-        vec![("a", 4.), ("b", 4.), ("c", 4.), ("d", 4.)]; "Allows abstention")]
+        vec![("a", 2.), ("b", 2.), ("c", 2.), ("d", 2.)]; "Allows abstention")]
     fn test_tally<N: Into<Name>>(votes: Vec<Vec<(N, usize)>>, expected: Vec<(N, f32)>) {
         let mut election = Election::new(1, 1);
         for (i, ballot) in votes.into_iter().enumerate() {
