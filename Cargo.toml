@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.93"
-chrono = "0.4.38"
+chrono = { version = "0.4.38", features = ["serde"] }
 dotenv = "0.15.0"
 either = "1.13.0"
 poise = { version = "0.6.1", features = ["cache"] }

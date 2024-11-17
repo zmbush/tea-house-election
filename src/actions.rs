@@ -1,3 +1,5 @@
+use std::num::ParseIntError;
+
 use either::Either;
 use poise::serenity_prelude as serenity;
 use serde::{Deserialize, Serialize};
@@ -23,6 +25,14 @@ impl ActionId for ElectionId {
     }
 }
 
+impl std::str::FromStr for ElectionId {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(ElectionId(s.parse()?))
+    }
+}
+
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub(crate) struct VoteId(usize);
 
@@ -37,6 +47,14 @@ impl VoteId {
 impl ActionId for VoteId {
     fn get_id(&self) -> Either<&ElectionId, &VoteId> {
         Either::Right(self)
+    }
+}
+
+impl std::str::FromStr for VoteId {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(VoteId(s.parse()?))
     }
 }
 
