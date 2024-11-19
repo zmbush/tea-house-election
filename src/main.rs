@@ -608,7 +608,8 @@ async fn get_result(
                     .ephemeral(true)
                     .content(match election.run() {
                         Some(list) => format!(
-                            "The following candidates have been elected:\n{}",
+                            "{} votes total\n\nThe following candidates have been elected:\n{}",
+                            election.ballots.len(),
                             list.into_iter()
                                 .map(|c| format!("* **{c}**"))
                                 .collect::<Vec<_>>()
